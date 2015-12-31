@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans
+     xmlns="http://www.springframework.org/schema/beans"
+     xmlns:beans="http://www.springframework.org/schema/beans"
+     xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:cc="http://www.capeclear.com/assembly/10"
+     xmlns:cloud="urn:com.workday/esb/cloud/10.0"
+     xmlns:env="http://schemas.xmlsoap.org/soap/envelope/"
+     xmlns:pi="urn:com.workday/picof"
+     xmlns:wd="urn:com.workday/bsvc"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ 
+	<cc:assembly id="WorkdayAssembly" version="20">
+        <cc:workday-in id="StartHere" routes-to="SyncMediation">
+            <cc:integration-system name="INT_PECI_Launcher">
+        <cloud:param name="Hours Since Completed">
+          <cloud:type>
+            <cloud:simple-type>number</cloud:simple-type>
+          </cloud:type>
+          <cloud:default>
+            <cloud:numeric>-6</cloud:numeric>
+          </cloud:default>
+        </cloud:param>
+        <cloud:param name="Manually select events to consolidate">
+          <cloud:type>
+            <cloud:class-report-field description="Integration Event" type="WID" singular="true">6a7f3d0d368549dc963d07b03d3daa09</cloud:class-report-field>
+          </cloud:type>
+          <cloud:default/>
+        </cloud:param>
+        <cloud:attribute-map-service name="INT_PECI_Launcher_AttrMap">
+          <cloud:attribute name="Pay Groups">
+            <cloud:type>
+              <cloud:class-report-field description="Pay Group" type="WID" singular="false">ac0ff35ab5a645f8aa5ab0ca64fd1d5a</cloud:class-report-field>
+            </cloud:type>
+          </cloud:attribute>
+          <cloud:attribute name="PECI Integration System">
+            <cloud:type>
+              <cloud:class-report-field description="Integration System." type="WID" singular="true">d69e425ae998413ca1f51870f6827698</cloud:class-report-field>
+            </cloud:type>
+          </cloud:attribute>
+          <cloud:attribute name="Consolidated Output File Name">
+            <cloud:type>
+              <cloud:simple-type>text</cloud:simple-type>
+            </cloud:type>
+          </cloud:attribute>
+          <cloud:attribute name="Expiration Days">
+            <cloud:type>
+              <cloud:simple-type>number</cloud:simple-type>
+            </cloud:type>
+          </cloud:attribute>
+        </cloud:attribute-map-service>
+      </cc:integration-system>
+        </cc:workday-in>
+        <cc:async-mediation id="Init" routes-to="CallGetIntEvts" handle-downstream-errors="true">
+            <cc:steps>
+                <cc:eval id="Init"><cc:expression>props['payGroupList'] = intsys.getAttributeReferenceDataList('INT_PECI_Launcher_AttrMap', 'Pay Groups', 'Organization_Reference_ID')</cc:expression><cc:expression>props['countPayGroups'] = props['payGroupList'].size()</cc:expression><cc:expression>props['PECI_IntegrationSystem'] = intsys.getAttributeReferenceData('PECI Integration System', 'Integration_System_ID')</cc:expression><cc:expression>props['AllRunsComplete'] = true</cc:expression><cc:expression>props['timeOffset'] = lp.getSimpleData('Hours Since Completed')</cc:expression><cc:expression>java.text.SimpleDateFormat formatter = new java.text.SimpleDateFormat(&quot;yyyy-MM-dd'T'HH:mm:ss.SSSZ&quot;);</cc:expression><cc:expression>java.util.Calendar calendar = java.util.Calendar.getInstance();</cc:expression><cc:expression>calendar.add(java.util.Calendar.HOUR_OF_DAY, props['timeOffset']);</cc:expression><cc:expression>props['asOfDTTM'] = formatter.format(calendar.getTime());</cc:expression><cc:expression>props['eventsToProcess'] = lp.getReferenceDataList('Manually select events to consolidate', 'Background_Process_Instance_ID')</cc:expression><cc:expression>props['doc.store.duration'] = intsys.getAttribute('Expiration Days')</cc:expression></cc:eval>
+                <cc:write id="Paygroups" output="variable" output-mimetype="text/xml" output-variable="inputPaygroups">
+                    <cc:message>
+                        <cc:text>&lt;wd:Paygroups xmlns:wd=&quot;urn:com.workday/bsvc&quot;>
+    @foreach{props['payGroupList'] as paygroup}
+        &lt;wd:Paygroup>@{paygroup}&lt;/wd:Paygroup>
+    @end{}
+&lt;/wd:Paygroups></cc:text>
+                    </cc:message>
+                </cc:write>
+                <cc:write id="GetIntEvts">
+                    <cc:message>
+                        <cc:text>&lt;env:Envelope
+    xmlns:env=&quot;http://schemas.xmlsoap.org/soap/envelope/&quot;
+    xmlns:xsd=&quot;http://www.w3.org/2001/XMLSchema&quot;>
+    &lt;env:Body>
+        &lt;wd:Get_Integration_Events_Request
+            xmlns:wd=&quot;urn:com.workday/bsvc&quot;
+            wd:version=&quot;v25.0&quot;>
+            @if{props['eventsToProcess'].isEmpty() == false} 
+            &lt;wd:Request_References>
+                @foreach{props['eventsToProcess'] as intEvent}
+                &lt;wd:Integration_Event_Reference>
+                    &lt;wd:ID wd:type=&quot;Background_Process_Instance_ID&quot;>@{intEvent}&lt;/wd:ID>
+                &lt;/wd:Integration_Event_Reference>
+                @end{}
+            &lt;/wd:Request_References>
+            @end{}
+            @if{props['eventsToProcess'].isEmpty() == true} 
+            &lt;wd:Request_Criteria>
+                &lt;wd:Integration_System_Reference>
+                    &lt;wd:ID wd:type =&quot;Integration_System_ID&quot;>@{props['PECI_IntegrationSystem']}&lt;/wd:ID>
+                &lt;/wd:Integration_System_Reference>
+                &lt;!--Zero or more repetitions:-
+            &lt;wd:Integration_Event_Status_Reference wd:Descriptor=&quot;complete&quot;>
+               &lt;wd:ID wd:type=&quot;Background_Process_Instance_Status_ID&quot;>Completed&lt;/wd:ID>
+            &lt;/wd:Integration_Event_Status_Reference>-->
+                &lt;!--Optional:-->
+                &lt;wd:Sent_After>@{props['asOfDTTM']}&lt;/wd:Sent_After>
+                &lt;!--Optional:
+            &lt;wd:Sent_Before>2015-12-24&lt;/wd:Sent_Before>-->
+            &lt;/wd:Request_Criteria>
+            @end{}
+            &lt;!--Optional:-->
+            &lt;wd:Response_Filter>
+                &lt;!--Optional:
+            &lt;wd:As_Of_Effective_Date>2015-12-23&lt;/wd:As_Of_Effective_Date> -->
+                &lt;!--Optional:
+            &lt;wd:As_Of_Entry_DateTime>2015-12-23T14:56:00&lt;/wd:As_Of_Entry_DateTime>-->
+                &lt;!--Optional:-->
+                &lt;wd:Count>100&lt;/wd:Count>
+            &lt;/wd:Response_Filter>
+        &lt;/wd:Get_Integration_Events_Request>
+    &lt;/env:Body>
+&lt;/env:Envelope></cc:text>
+                    </cc:message>
+                </cc:write>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CatchInitError"/>
+        </cc:async-mediation>
+        <cc:local-out id="CompleteIntegrationEvent" endpoint="vm://wcc/PutIntegrationEvent">
+            <cc:set name="is.event.wid" value="lp.isSet() ? lp.getIntegrationEventWID() : null"/>
+            <cc:set name="is.system.wid" value="lp.isSet() ? lp.getIntegrationSystemRefWID() : null"/>
+            <cc:set name="is.event.completed" value="'current'"/>
+        </cc:local-out>
+        <cc:async-mediation id="CopyReport">
+            <cc:steps>
+                <cc:copy id="IntEvents" output="variable" output-mimetype="text/xml" output-variable="PECI_Integration_Events"/>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:sync-mediation id="SyncMediation" routes-to="Init" routes-response-to="CheckComplete">
+            <cc:request-steps>
+            </cc:request-steps>
+            <cc:response-steps>
+                <cc:copy id="Copy" output-mimetype="text/xml" input="variable" input-variable="CompletedIntegrationEvents"/>
+            </cc:response-steps>
+        </cc:sync-mediation>
+        <cc:splitter id="Splitter">
+            <cc:sub-route name="SubRoute" routes-to="ParseEvents"/>
+            <cc:xml-stream-splitter xpath="/wd:Paygroups/wd:Paygroup"/>
+        </cc:splitter>
+        <cc:async-mediation id="ParseEvents" routes-to="Route0" handle-downstream-errors="true">
+            <cc:steps>
+                <cc:eval id="InitEvents"><cc:expression>props['paygroupIn'] = parts[0].xpath('wd:Paygroup')</cc:expression></cc:eval>
+                <cc:xslt id="Xform" input="variable" input-variable="PECI_Integration_Events" url="PayGroupProcessing.xsl"/>
+                <cc:eval id="CountPGs"><cc:expression>props['paygroupMatchCount'] = parts[0].xpath(&quot;count(//wd:Integration_Event_Reference)&quot;)</cc:expression><cc:expression>props['paygroupStatus'] = parts[0].xpath(&quot;/wd:PECI_IntegrationEvents/wd:Integration_Event/wd:ID[@wd:type='Background_Process_Instance_Status_ID']&quot;)</cc:expression></cc:eval>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CatchEventsError"/>
+        </cc:async-mediation>
+        <cc:workday-out-soap id="CallGetIntEvts" routes-response-to="AsyncMediation0" application="Integrations" version="v25.0"/>
+        <cc:async-mediation id="AsyncMediation0" routes-to="Splitter">
+            <cc:steps>
+                <cc:copy id="UnwrapGI" input="soapbody"/>
+                <cc:copy id="SaveEvts" output="variable" output-mimetype="text/xml" output-variable="PECI_Integration_Events"/>
+                <cc:copy id="InPaygroups" input="variable" input-variable="inputPaygroups"/>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:aggregator id="Aggregator" routes-to="AsyncMediation1" force-batch-on-last-message="true">
+            <cc:size-batch-strategy batch-size="-1"/>
+            <cc:xml-message-content-collater output="variable" output-variable="CompletedIntegrationEvents" namespaces="wd urn:com.workday/bsvc" xpath="/wd:PECI_IntegrationEvents/*">
+        <cc:header-text>&lt;wd:PECI_IntegrationEvents xmlns:wd=&quot;urn:com.workday/bsvc&quot;></cc:header-text>
+        <cc:footer-text>&lt;/wd:PECI_IntegrationEvents></cc:footer-text>
+      </cc:xml-message-content-collater>
+        </cc:aggregator>
+        <cc:async-mediation id="AsyncMediation1">
+            <cc:steps>
+                <cc:log id="Log">
+                    <cc:log-message>
+                        <cc:message-content/>
+                    </cc:log-message>
+                </cc:log>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:route id="Route0">
+            <cc:mvel-strategy>
+                <cc:choose-route expression="parts[0].xpath(&quot;count(//wd:Integration_Event_Reference)&quot;) &lt; 1" route="Zero runs found"/>
+                <cc:choose-route expression="parts[0].xpath(&quot;count(//wd:Integration_Event_Reference)&quot;) > 1" route="MoreThan1Found"/>
+                <cc:choose-route expression="parts[0].xpath(&quot;count(//wd:Integration_Event_Reference)&quot;) == 1 &amp;&amp; (props['paygroupStatus']  == 'Completed' || props['paygroupStatus'] == 'CompletedWithWarnings')" route="Aggregate"/>
+                <cc:choose-route expression="true" route="NotFound"/>
+            </cc:mvel-strategy>
+            <cc:sub-route name="Aggregate" routes-to="Aggregator"/>
+            <cc:sub-route name="MoreThan1Found" routes-to="PGNotComplete"/>
+            <cc:sub-route name="Zero runs found" routes-to="PGNotComplete"/>
+            <cc:sub-route name="NotFound" routes-to="PGNotComplete"/>
+        </cc:route>
+        <cc:async-mediation id="PGNotComplete" routes-to="PutIntegrationMessage">
+            <cc:steps>
+                <cc:log id="Log">
+                    <cc:log-message>
+                        <cc:text>Completed Paygroup Run Not Found for @{props['paygroupIn']}</cc:text>
+                        <cc:message-content/>
+                    </cc:log-message>
+                </cc:log>
+                <cc:eval id="Eval"><cc:expression>props['AllRunsComplete']  = false</cc:expression></cc:eval>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:local-out id="PutIntegrationMessage" endpoint="vm://wcc/PutIntegrationMessage"><cc:set name="is.message.severity" value="'ERROR'"/><cc:set name="is.message.summary" value="&quot;No completed pay group run found&quot;"/><cc:set name="is.message.detail" value="&quot;No completed event found for Paygroup &quot; # props['paygroupIn']"/></cc:local-out>
+        <cc:route id="CheckComplete">
+            <cc:mvel-strategy>
+                <cc:choose-route expression="props['AllRunsComplete']  == false" route="NotComplete"/>
+                <cc:choose-route expression="true" route="Complete"/>
+            </cc:mvel-strategy>
+            <cc:sub-route name="NotComplete" routes-to="CompleteIntegrationEvent"/>
+            <cc:sub-route name="Complete" routes-to="DoSomething"/>
+        </cc:route>
+        <cc:send-error id="SendErrorGlobal" rethrow-error="false" routes-to="CallPutIntegrationMessageGlobal"/>
+        <cc:local-out id="CallPutIntegrationEventGlobal" endpoint="vm://wcc/PutIntegrationEvent">
+            <cc:set name="is.event.completed" value="'current'"/>
+        </cc:local-out>
+        <cc:local-out id="CallPutIntegrationMessageGlobal" routes-response-to="CallPutIntegrationEventGlobal" endpoint="vm://wcc/PutIntegrationMessage">
+            <cc:set name="is.message.severity" value="'CRITICAL'"/>
+            <cc:set name="is.message.summary" value="'The following unexpected error has ocurred: ' + util.cleanString(context.getErrorMessage())"/>
+        </cc:local-out>
+        <cc:async-mediation id="DoSomething" routes-to="CallStartMerge">
+            <cc:steps>
+                <cc:log id="Log">
+                    <cc:log-message>
+                        <cc:text>GO MERGE THE FILES
+@{vars['CompletedIntegrationEvents'].text}</cc:text>
+                        <cc:line-separator/>
+                        <cc:message-content/>
+                    </cc:log-message>
+                </cc:log>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:local-out id="CatchInitError" endpoint="vm://wcc/PutIntegrationMessage"><cc:set name="is.message.severity" value="'ERROR'"/><cc:set name="is.message.summary" value="'Error building Get_Integration_Events WWS Request'"/><cc:set name="is.message.detail" value="'Error initializing Get_Integration_Events request ' #  util.cleanString(context.getErrorMessage())"/></cc:local-out>
+        <cc:local-out id="CatchEventsError" endpoint="vm://wcc/PutIntegrationMessage">
+            <cc:set name="is.message.severity" value="'ERROR'"/>
+            <cc:set name="is.message.summary" value="'Error parsing integration events WWS Response'"/>
+            <cc:set name="is.message.detail" value="'Error parsing Get_Integration_Events response ' #  util.cleanString(context.getErrorMessage())"/>
+        </cc:local-out>
+        <cc:async-mediation id="RetrieveFromWD" routes-to="AggPayFiles">
+            <cc:steps>
+                <cc:eval id="Eval"><cc:expression>props['int.event.blob.reference'] = parts[0].text // get WID of deliverable document</cc:expression></cc:eval>
+                <cc:retrieve id="Retrieve" entry="props['int.event.blob.reference']"/>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:local-out id="PersistInMessage" store-message="none" routes-response-to="SplitEventDocuments" endpoint="vm://INT_PECI_Launcher/LogAndAttachToEvent">
+            <cc:set name="persist.file.name" value="'PECI_IntegrationEventsToMerge.xml'"/>
+        </cc:local-out>
+        <cc:local-out id="PutIntegrationMessage0" endpoint="vm://wcc/PutIntegrationMessage">
+            <cc:set name="is.message.severity" value="'INFO'"/>
+            <cc:set name="is.message.summary" value="'Attached File; See Output Files'"/>
+            <cc:set name="is.document.variable.name" value="'var.stored.msg.atom'"/>
+            <cc:set name="is.document.file.name"/>
+            <cc:set name="is.document.deliverable" value="'false'"/>
+        </cc:local-out>
+        <cc:sync-mediation id="SyncMediation0" routes-to="PutIntegrationMessage0">
+            <cc:request-steps>
+                <cc:zip id="Zip" input="message"/>
+                <cc:store id="Store" output="variable" output-variable="var.stored.msg.atom" collection="'IntegrationsList'" contentDisposition="attachment;filename=&quot;@{props['persist.file.name']}&quot;" expiresIn="P@{props['doc.store.duration']}D" schema="http://www.w3.org/2005/Atom" title="@{props['persist.file.name']}"/>
+            </cc:request-steps>
+            <cc:response-steps>
+            </cc:response-steps>
+        </cc:sync-mediation>
+        <cc:aggregator id="AggPayFiles" routes-to="CallLogFinalOutput">
+            <cc:size-batch-strategy batch-size="-1"/>
+            <cc:xml-message-content-collater namespaces="peci=&quot;urn:com.workday/peci&quot;" xpath="/peci:Workers_Effective_Stack/peci:Worker">
+        <cc:header-text>&lt;peci:Workers_Effective_Stack xmlns:peci=&quot;urn:com.workday/peci&quot;></cc:header-text>
+        <cc:footer-text>&lt;/peci:Workers_Effective_Stack></cc:footer-text>
+      </cc:xml-message-content-collater>
+        </cc:aggregator>
+        <cc:splitter id="SplitEventDocuments">
+            <cc:sub-route name="Retrieve" routes-to="RetrieveFromWD"/>
+            <cc:xml-stream-splitter xpath="/wd:PECI_IntegrationEvents/wd:Integration_Event/wd:Output_Document_Data[wd:Integration_Repository_Document_Data[wd:Document_Tag_Reference/wd:ID[@wd:type='Workday_Document_Tag_Name']='Deliverable' and wd:Content_Type_Reference/wd:ID[@wd:type='Content_Type_ID']='text/xml'] ]/wd:Integration_Repository_Document_Reference/wd:ID[@wd:type='WID']&#xA;"/>
+        </cc:splitter>
+        <cc:local-in id="StartMergePECI" routes-to="init"/>
+        <cc:local-in id="LogAndAttachToEvent" routes-to="SyncMediation0">
+            <cc:parameter name="persist.file.name" required="true"/>
+        </cc:local-in>
+        <cc:local-out id="CallLogFinalOutput" store-message="none" endpoint="vm://INT_PECI_Launcher/LogAndAttachToEvent" clone-request="true">
+            <cc:set name="persist.file.name" value="props['peci.merged.file.name']"/>
+        </cc:local-out>
+        <cc:async-mediation id="init" routes-to="PersistInMessage">
+            <cc:steps>
+                <cc:eval id="Eval"><cc:expression>props['msg.audit.file.name']='MessageAudit.zip'</cc:expression><cc:expression>props['attrPeciFileName'] = intsys.getAttribute('Consolidated Output File Name')  </cc:expression><cc:expression>props['peci.merged.file.name'] = props['attrPeciFileName'].isEmpty() ? 'PECI_PayGroup_MergedOutput.xml' : props['attrPeciFileName'] ;</cc:expression></cc:eval>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:local-out id="CallStartMerge" store-message="none" endpoint="vm://INT_PECI_Launcher/StartMergePECI"/>
+	</cc:assembly>
+
+</beans>
